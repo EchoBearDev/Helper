@@ -120,6 +120,7 @@
                     FEED TEORÍAS <span id="feed-notification-dot" class="notification-dot"></span>
                 </button>
                 <button id="tab-chat" class="tab-btn w-full" onclick="switchTab('chat')">CHAT RÁPIDO</button>
+                <button id="tab-leaderboard" class="tab-btn w-full" onclick="switchTab('leaderboard')">TABLA DE LÍDERES</button>
                 <button id="tab-profile" class="tab-btn w-full" onclick="switchTab('profile')">MI PERFIL</button>
                 <button id="tab-info" class="tab-btn w-full" onclick="switchTab('info')">INFO SCOTT</button>
                 <button onclick="logout()" class="tab-btn w-full mt-4 text-red-400">CERRAR TURNO</button>
@@ -137,6 +138,13 @@
                  <button onclick="loadFeed(true)" class="pizza-btn">🔄 ACTUALIZAR FEED</button>
             </div>
             <p class="text-center text-purple-500">¡Sé el primero!</p>
+        </div>
+        
+        <div id="leaderboard" class="content hidden p-4">
+            <h2 class="text-xl text-yellow-400 mb-4 border-b border-yellow-400 pb-2">TOP 10 GUARDIAS DE PIZZA SLICES</h2>
+            <div id="leaderboard-list" class="space-y-3">
+                <p class="text-center text-gray-500">Cargando la clasificación...</p>
+            </div>
         </div>
         
         <div id="chat" class="content hidden flex flex-col h-full relative">
@@ -564,6 +572,8 @@
                  setTimeout(() => {
                       chatMessages.scrollTop = chatMessages.scrollHeight;
                  }, 50);
+            } else if (tab === 'leaderboard') {
+                 loadLeaderboard();
             }
         }
 
@@ -1057,7 +1067,81 @@
             sendBtn.disabled = false;
         };
 
+        // ===================================
+        // === FUNCIÓN PARA TABLA DE LÍDERES (NUEVO) ===
+        // ===================================
 
+        async function loadLeaderboard() {
+            const listContainer = document.getElementById('leaderboard-list');
+            listContainer.innerHTML = '<p class="text-center text-gray-500">Calculando prestigio...</p>';
+
+            // Traemos una cantidad grande de posts para sumar los likes en JS
+            const { data: posts, error } = await supabase
+                .from('posts')
+                .select(`
+                    user_id,
+                    likes
+                `)
+                .limit(10000); 
+                
+            if (error) {
+                console.error('Error al cargar los posts para ranking:', error);
+                listContainer.innerHTML = '<p class="text-center text-red-500">Error al cargar el ranking.</p>';
+                return;
+            }
+
+            // 1. Calcular el total de likes por usuario
+            const userLikesMap = posts.reduce((acc, post) => {
+                if (post.likes > 0) {
+                    acc[post.user_id] = (acc[post.user_id] || 0) + post.likes;
+                }
+                return acc;
+            }, {});
+
+            // 2. Convertir el mapa a un array y ordenar
+            let leaderboardData = Object.keys(userLikesMap).map(userId => ({
+                user_id: userId,
+                total_likes: userLikesMap[userId]
+            }));
+
+            leaderboardData.sort((a, b) => b.total_likes - a.total_likes);
+
+            // 3. Limitar a los Top 10
+            leaderboardData = leaderboardData.slice(0, 10);
+            
+            // 4. Obtener la información completa del perfil para los top 10
+            const topUserIds = leaderboardData.map(d => d.user_id);
+            await Promise.all(topUserIds.map(id => getProfileInfo(id)));
+
+            if (!leaderboardData || leaderboardData.length === 0) {
+                listContainer.innerHTML = '<p class="text-center text-gray-500">Aún no hay suficiente prestigio. ¡Publica!</p>';
+                return;
+            }
+
+            listContainer.innerHTML = leaderboardData.map((entry, index) => {
+                const profile = profilesCache[entry.user_id] || { name: 'Anónimo', avatar: DEFAULT_AVATAR };
+                const avatar = profile.avatar || DEFAULT_AVATAR;
+                const rank = index + 1;
+                const rankColor = rank === 1 ? 'border-yellow-400' : rank <= 3 ? 'border-gray-300' : 'border-purple-600';
+
+                return `
+                    <div class="bg-gray-800 p-3 rounded flex items-center justify-between border-l-4 ${rankColor}">
+                        <div class="flex items-center">
+                            <span class="text-2xl font-bold mr-4 text-yellow-500 w-8 text-center">#${rank}</span>
+                            ${renderAvatarHTML({ avatar: avatar, name: profile.name }, 'w-10 h-10')}
+                            <div class="ml-3">
+                                <h3 onclick="viewUserProfile('${entry.user_id}')" class="font-bold text-purple-300 username-link">${profile.name}</h3>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-yellow-400 text-lg">${entry.total_likes} Pizza Slices</p>
+                            <button onclick="viewUserProfile('${entry.user_id}')" class="pizza-btn text-xs mt-1">Ver Perfil</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // === FUNCIONES DE COMENTARIOS Y REALTIME ===
         
         // Lógica de loadCameras eliminada
