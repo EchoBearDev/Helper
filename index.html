@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fazbear Social Hub v13.5 (Solo Feed y Chat)</title>
+    <title>Fazbear Social Hub v14.0 (Monitores 24H)</title>
     <script src="https://cdn.tailwindcss.com?v=134"></script> 
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -56,7 +56,6 @@
             object-fit: cover;
             border: 2px solid #9333ea;
         }
-        /* Gear styles are kept but will only render if a profile has a gear_url */
         .avatar-gear {
             position: absolute;
             top: 0; 
@@ -66,7 +65,13 @@
             object-fit: contain;
             pointer-events: none; 
         }
-        
+        #monitors-carousel::-webkit-scrollbar {
+             height: 5px;
+        }
+        #monitors-carousel::-webkit-scrollbar-thumb {
+            background-color: #9333ea;
+            border-radius: 20px;
+        }
     </style>
 </head>
 <body>
@@ -109,7 +114,7 @@
             </div>
             <div class="flex justify-between items-center">
                 <p class="text-xs text-yellow-400">Turno de Noche: <span id="session-time">00:00:00</span></p>
-                <span class="text-green-400">V13.5 | <span id="clock"></span></span>
+                <span class="text-green-400">V14.0 | <span id="clock"></span></span>
             </div>
         </header>
 
@@ -131,6 +136,9 @@
 
 
         <div id="feed" class="content">
+            <div id="monitors-carousel" class="flex overflow-x-auto space-x-4 p-2 mb-4 bg-gray-900 rounded border-b border-purple-500">
+                <button onclick="showPostOptions(true)" class="flex-shrink-0 w-16 h-16 rounded-full bg-purple-600 text-3xl text-white flex items-center justify-center border-2 border-dashed border-white">+</button>
+                </div>
             <div class="mb-4">
                  <input type="text" id="search-input" placeholder="Buscar teorías, usuarios o temas..." class="comment-input" onkeyup="handleSearch()">
             </div>
@@ -227,7 +235,7 @@
             </div>
         </div>
 
-        <button id="fab" class="fab" onclick="openPostModal(currentTab)">
+        <button id="fab" class="fab" onclick="showPostOptions()">
              <img id="fab-avatar" src="https://placehold.co/56x56/1a1a1a/9333ea?text=+" class="w-full h-full rounded-full border-2 border-white">
         </button>
     </div>
@@ -242,20 +250,35 @@
             <button onclick="closePostModal()" class="mt-2 text-red-400">CERRAR</button>
         </div>
     </div>
-
+    
+    <div id="monitor-viewer-modal" class="fixed inset-0 bg-black bg-opacity-95 hidden flex flex-col items-center justify-center z-50 p-4">
+        <button onclick="closeMonitorViewer()" class="absolute top-4 right-4 text-white text-3xl z-10">×</button>
+        <div id="monitor-viewer-content" class="w-full max-w-lg max-h-full bg-gray-900 rounded relative">
+            <div id="monitor-header" class="absolute top-0 left-0 right-0 p-3 bg-black bg-opacity-50 flex items-center justify-between text-white z-10">
+                <div class="flex items-center">
+                    <div id="monitor-avatar-container" class="w-8 h-8 mr-2"></div>
+                    <span id="monitor-username" class="font-bold"></span>
+                </div>
+                <span id="monitor-time" class="text-xs"></span>
+            </div>
+            <img id="monitor-image" src="" class="w-full h-auto object-contain max-h-[80vh] block">
+            <button id="monitor-delete-btn" data-monitor-id="" onclick="deletePost(this.dataset.monitorId, 'cameras')" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 pizza-btn bg-red-600 text-xs hidden">BORRAR MONITOR</button>
+        </div>
+    </div>
     <script>
         // === TUS LLAVES ===
         const SUPABASE_URL = 'https://fnoowiwoqexnlrmhilau.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZub293aXdvcWV4bmxybWhpbGF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExNjY2OTYsImV4cCI6MjA3Njc0MjY5Nn0.yrPI1mqQ-xRYmEKEFFUhAoOOHKo4VZsW0m15B5RbXE4';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // === VARIABLES GLOBALES Y CONSTANTES V13.5 (REDUCIDAS) ===
+        // === VARIABLES GLOBALES Y CONSTANTES V14.0 ===
         let profilesCache = {};
         let currentTab = 'feed';
         let targetUserId = null; 
         let loginTime = null; 
         const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB en bytes 
         const DEFAULT_AVATAR = 'https://placehold.co/40x40/1a1a1a/9333ea?text=U';
+        let isUploadingMonitor = false; // NUEVO: Para distinguir Post de Monitor
         
         // UX-1: INTERVALO DE AUTOREFRESH (30 segundos)
         const REFRESH_INTERVAL = 30000; 
@@ -480,7 +503,6 @@
                 if (currentTab === 'feed') {
                     loadFeed();
                 } 
-                // Lógica de cámaras eliminada
             }, REFRESH_INTERVAL);
         }
 
@@ -493,9 +515,9 @@
             }
 
             loadProfile();
+            loadCameras(); // NUEVO: Cargar Monitores
             loadFeed();
             loadChat();
-            // loadShop eliminada
             setupRealtime();
             startAutoRefresh(); 
             switchTab('feed', false); 
@@ -566,7 +588,6 @@
                  localStorage.removeItem('hasNewLike'); 
                  checkNotifications(); 
             }
-            // Lógica de tienda eliminada
             if (tab === 'chat') {
                  const chatMessages = document.getElementById('chat-messages');
                  setTimeout(() => {
@@ -576,30 +597,55 @@
                  loadLeaderboard();
             }
         }
+        
+        // === NUEVO: Lógica de Menú de Publicación ===
+        function showPostOptions() {
+             const options = confirm("¿Qué deseas publicar?\n\n- Aceptar: Subir un nuevo MONITOR (Caduca en 24h, visible para seguidores).\n- Cancelar: Crear una nueva TEORÍA (Post normal).");
+             if (options) {
+                 // Subir Monitor (Camera)
+                 openPostModal(true); 
+             } else {
+                 // Crear Teoría (Post)
+                 openPostModal(false); 
+             }
+         }
 
-        function openPostModal() {
+        function openPostModal(isMonitor = false) {
+             isUploadingMonitor = isMonitor;
+             const modalTitle = document.getElementById('modal-title');
+             const fileLabel = document.getElementById('file-label');
+             const postContent = document.getElementById('post-content');
+             const postFile = document.getElementById('post-file');
+         
+             if (isMonitor) {
+                 modalTitle.textContent = 'SUBIR MONITOR (24H)';
+                 fileLabel.textContent = 'CAPTURA DE CÁMARA (Imagen, Máx 5MB)';
+                 postContent.placeholder = 'Mensaje opcional para el Monitor...';
+                 postFile.accept = 'image/*'; 
+             } else {
+                 modalTitle.textContent = 'NUEVA TEORÍA';
+                 fileLabel.textContent = 'Imagen (Máx 5MB)';
+                 postContent.placeholder = 'Tu teoría...';
+                 postFile.accept = 'image/*';
+             }
+             
              document.getElementById('post-modal').classList.remove('hidden'); 
-             document.getElementById('post-content').value = '';
-             document.getElementById('post-file').value = ''; 
+             postContent.value = '';
+             postFile.value = ''; 
              document.getElementById('submit-post-btn').textContent = 'PUBLICAR'; 
              document.getElementById('submit-post-btn').disabled = false;
+         }
 
-             // Lógica de cámaras eliminada, siempre es una Teoría (Feed)
-             document.getElementById('modal-title').textContent = 'NUEVA TEORÍA';
-             document.getElementById('file-label').textContent = 'Imagen (Máx 5MB)';
-             document.getElementById('post-file').accept = 'image/*';
-             document.getElementById('post-content').placeholder = 'Tu teoría...';
-        }
         function closePostModal() { 
              document.getElementById('post-modal').classList.add('hidden'); 
              document.getElementById('post-content').value = '';
              document.getElementById('post-file').value = ''; 
+             isUploadingMonitor = false;
         }
 
         // === FUNCIONES DE AVATAR CON GEAR (Se mantiene por si quieres implementarlo sin tokens) ===
         function renderAvatarHTML(profile, size = 'w-10 h-10') {
              const profileAvatar = profile.avatar || DEFAULT_AVATAR;
-             // El gear_url sigue siendo parte del perfil, aunque no haya tienda
              const gearStyle = profile.gear_url ? `
                  <img src="${profile.gear_url}" class="avatar-gear">
              ` : '';
@@ -615,7 +661,6 @@
         async function getProfileInfo(userId) {
             if (profilesCache[userId]) return profilesCache[userId];
 
-            // NOTA: ELIMINAMOS FAZ_TOKENS de la consulta
             const { data: profileData } = await supabase.from('profiles').select('*, gear_url').eq('user_id', userId).single();
             const { count: followersCount } = await supabase.from('followers').select('*', { count: 'exact' }).eq('following_id', userId);
             
@@ -631,7 +676,6 @@
                  avatar: profileData.avatar_url || DEFAULT_AVATAR,
                  followers: followersCount || 0,
                  pin: profileData.pin,
-                 // faz_tokens: profileData.faz_tokens || 0, // ELIMINADO
                  gear_url: profileData.gear_url 
             } : { ...defaultProfile, avatar: DEFAULT_AVATAR, followers: followersCount || 0, gear_url: null };
             
@@ -669,6 +713,9 @@
         async function loadFeed(isManualRefresh = false, searchQuery = '') {
              if (isManualRefresh) profilesCache = {}; 
 
+             // NUEVO: Cargar cámaras/monitores al cargar el feed
+             loadCameras(); 
+
              let query = supabase.from('posts').select('*').order('created_at', { ascending: false });
 
              if (searchQuery) {
@@ -686,6 +733,7 @@
             
             // Reconstrucción parcial para mantener el input y el botón
             const contentHTML = `
+                ${document.getElementById('monitors-carousel').outerHTML}
                 <div class="mb-4">
                     <input type="text" id="search-input" placeholder="Buscar teorías, usuarios o temas..." class="comment-input" onkeyup="handleSearch()" value="${searchQuery}">
                 </div>
@@ -727,6 +775,7 @@
                     `;
                 }).join('');
             
+            // Reemplazar todo el contenido del feed, manteniendo la funcionalidad
             container.innerHTML = contentHTML + postsHTML;
             (posts || []).forEach(post => loadComments(post.id));
         }
@@ -763,7 +812,6 @@
                 const { error } = await supabase.from('likes').insert({ post_id: postId, user_id: USER_ID });
                 if (error && error.code !== '23505') console.error(error); 
                 
-                // NOTA: ELIMINAMOS LA LÓGICA DE INCREMENTO DE TOKENS DEL DUEÑO DEL POST
                 if (USER_ID !== postOwnerId) {
                     localStorage.setItem('hasNewLike', 'true');
                     checkNotifications();
@@ -949,8 +997,6 @@
                  document.getElementById('fab-avatar').src = profile.avatar || DEFAULT_AVATAR; 
 
                  document.getElementById('display-user-pin').textContent = profile.pin ? '***' + profile.pin.slice(-1) : 'NO DISPONIBLE';
-                 
-                 // NOTA: ELIMINAMOS EL DISPLAY DE TOKENS DEL ENCABEZADO Y PERFIL
             } else {
                  document.getElementById('fab-avatar').src = DEFAULT_AVATAR;
             }
@@ -1027,7 +1073,6 @@
             
             await supabase.from('posts').update({ name: name, avatar: avatarUrl }).eq('user_id', USER_ID);
             await supabase.from('chat_messages').update({ name: name, avatar: avatarUrl }).eq('user_id', USER_ID);
-            // Lógica de cámaras eliminada
             
             avatarFileInput.value = ''; 
             
@@ -1068,7 +1113,7 @@
         };
 
         // ===================================
-        // === FUNCIÓN PARA TABLA DE LÍDERES (NUEVO) ===
+        // === FUNCIÓN PARA TABLA DE LÍDERES ===
         // ===================================
 
         async function loadLeaderboard() {
@@ -1142,9 +1187,85 @@
             }).join('');
         }
         
-        // === FUNCIONES DE COMENTARIOS Y REALTIME ===
+        // ===================================
+        // === NUEVO: FUNCIONES DE MONITORES ===
+        // ===================================
         
-        // Lógica de loadCameras eliminada
+        // Función para cargar los Monitores (Cámaras)
+        async function loadCameras() {
+            // RLS permite ver solo los propios y los de seguidos (no expirados)
+            const { data: cameras, error } = await supabase.from('cameras').select('*').order('created_at', { ascending: false });
+            
+            const carousel = document.getElementById('monitors-carousel');
+            // Mantiene el botón de "Subir Monitor" y limpia el resto
+            carousel.innerHTML = '<button onclick="showPostOptions(true)" class="flex-shrink-0 w-16 h-16 rounded-full bg-purple-600 text-3xl text-white flex items-center justify-center border-2 border-dashed border-white">+</button>';
+
+            if (error) {
+                console.error('Error al cargar Monitores:', error);
+                return;
+            }
+            if (!cameras || cameras.length === 0) return;
+            
+            const userIds = [...new Set((cameras || []).map(c => c.user_id))];
+            await Promise.all(userIds.map(id => getProfileInfo(id)));
+
+            cameras.forEach(camera => {
+                const profile = profilesCache[camera.user_id] || { name: 'Anónimo', avatar: DEFAULT_AVATAR };
+                const isMyCamera = camera.user_id === USER_ID;
+                
+                const monitorHTML = `
+                    <div onclick="openMonitorViewer('${camera.id}', '${camera.image_url}', '${camera.user_id}', '${camera.created_at}', '${camera.content || ''}')" 
+                         class="flex-shrink-0 w-16 h-16 rounded-full border-4 ${isMyCamera ? 'border-yellow-400' : 'border-purple-500'} relative overflow-hidden cursor-pointer"
+                         title="${profile.name}'s Monitor">
+                        ${renderAvatarHTML(profile, 'w-full h-full')} 
+                    </div>
+                `;
+                carousel.innerHTML += monitorHTML;
+            });
+        }
+        
+        let currentMonitorId = null;
+
+        function openMonitorViewer(id, imageUrl, userId, createdAt, content = '') {
+            const viewerModal = document.getElementById('monitor-viewer-modal');
+            const deleteBtn = document.getElementById('monitor-delete-btn');
+            
+            const profile = profilesCache[userId] || { name: 'Anónimo', avatar: DEFAULT_AVATAR };
+            
+            document.getElementById('monitor-avatar-container').innerHTML = renderAvatarHTML(profile, 'w-8 h-8');
+            document.getElementById('monitor-username').textContent = profile.name;
+            document.getElementById('monitor-image').src = imageUrl;
+            
+            const timeDiffMs = Date.now() - new Date(createdAt).getTime();
+            const timeElapsedHours = Math.floor(timeDiffMs / 3600000); 
+            const timeRemainingHours = Math.max(0, 24 - timeElapsedHours); 
+            
+            document.getElementById('monitor-time').textContent = `${timeRemainingHours}h restantes`;
+
+            // Opcional: Mostrar contenido/mensaje del monitor sobre la imagen
+            if (content) {
+                 // Aquí puedes añadir un div para mostrar el texto, por simplicidad, lo ignoraré por ahora.
+                 console.log("Contenido del Monitor:", content);
+            }
+            
+            currentMonitorId = id;
+            deleteBtn.dataset.monitorId = id;
+            
+            if (userId === USER_ID || IS_ADMIN) {
+                deleteBtn.classList.remove('hidden');
+            } else {
+                deleteBtn.classList.add('hidden');
+            }
+            
+            viewerModal.classList.remove('hidden');
+        }
+
+        function closeMonitorViewer() {
+            document.getElementById('monitor-viewer-modal').classList.add('hidden');
+            currentMonitorId = null;
+        }
+
+        // === FUNCIONES DE COMENTARIOS Y REALTIME ===
         
         const appendChatMessage = (m) => {
              const container = document.getElementById('chat-messages');
@@ -1248,7 +1369,7 @@
                     supabase.from('posts').select('user_id').eq('id', payload.new.post_id).single()
                           .then(({ data }) => {
                               if (data && data.user_id === USER_ID) {
-                                   // loadProfile(); // ELIMINADO: Ya no actualizamos tokens
+                                   // loadProfile();
                               }
                               if (data && data.user_id === USER_ID && payload.new.user_id !== USER_ID) {
                                    localStorage.setItem('hasNewLike', 'true');
@@ -1270,11 +1391,17 @@
                 .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages' }, () => loadChat())
                 .subscribe();
 
+            // NUEVO: Monitores (Cámaras)
+            supabase.channel('cameras_channel')
+                 .on('postgres_changes', { event: '*', schema: 'public', table: 'cameras' }, () => {
+                     loadCameras();
+                 })
+                 .subscribe();
+
             // Actualización general de Feed/Perfil
             supabase.channel('feed_channel')
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, () => loadFeed())
                 .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, () => loadFeed())
-                // Lógica de cámaras eliminada
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
                     if (payload.new.user_id === USER_ID) {
                         profilesCache = {}; 
@@ -1289,6 +1416,7 @@
                      if (currentTab === 'user-profile-view' && targetUserId) {
                           viewUserProfile(targetUserId); 
                      }
+                     loadCameras(); // Recargar Monitores al seguir/dejar de seguir
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'blocked_users' }, () => {
                      if (currentTab === 'user-profile-view' && targetUserId) {
@@ -1316,9 +1444,7 @@
              const file = fileInput.files[0];
              const submitBtn = document.getElementById('submit-post-btn');
              
-             // NOTA: ELIMINADA LA LÓGICA DE CÁMARAS. SIEMPRE ES UN POST.
-             const bucket = 'post_images';
-             const table = 'posts';
+             const table = isUploadingMonitor ? 'cameras' : 'posts';
 
              if (!content && !file) {
                  alert('Debes escribir contenido o subir un archivo.');
@@ -1337,7 +1463,7 @@
              let fileUrl = null;
 
              if (file) {
-                 fileUrl = await uploadFile(file, bucket);
+                 fileUrl = await uploadFile(file, 'post_images');
                  if (!fileUrl) {
                      submitBtn.textContent = 'PUBLICAR';
                      submitBtn.disabled = false;
@@ -1345,32 +1471,56 @@
                  }
              }
 
-             const postData = {
-                 user_id: USER_ID,
-                 name: profile.name,
-                 avatar: profile.avatar,
-                 content: content,
-                 likes: 0,
-                 image: fileUrl // Siempre es imagen (video eliminado)
-             };
+             let insertData = {};
 
-             const { error } = await supabase.from(table).insert(postData);
+             if (table === 'cameras') {
+                 // Insertar Monitor (solo imagen y texto)
+                 if (!fileUrl) {
+                     alert("Un Monitor requiere al menos una imagen/video.");
+                     submitBtn.textContent = 'PUBLICAR';
+                     submitBtn.disabled = false;
+                     return;
+                 }
+                 insertData = {
+                     user_id: USER_ID,
+                     image_url: fileUrl, 
+                     content: content // Opcional
+                 };
+             } else {
+                 // Insertar Post (Teoría)
+                 insertData = {
+                     user_id: USER_ID,
+                     name: profile.name,
+                     avatar: profile.avatar,
+                     content: content,
+                     likes: 0,
+                     image: fileUrl 
+                 };
+             }
+             
+
+             const { error } = await supabase.from(table).insert(insertData);
 
              if (error) {
-                 console.error('Error al publicar:', error);
-                 alert('Error al publicar en Supabase.');
+                 console.error(`Error al publicar en ${table}:`, error);
+                 alert(`Error al publicar en Supabase. Si es un MONITOR, verifica la tabla 'cameras' y la RLS.`);
              }
 
              closePostModal();
              submitBtn.textContent = 'PUBLICAR';
              submitBtn.disabled = false;
-             loadFeed(true);
+             
+             if (table === 'posts') {
+                 loadFeed(true);
+             } else {
+                 loadCameras();
+             }
         }
         
         async function deletePost(postId, table) {
              if (confirm(`¿Estás seguro de que quieres BORRAR este elemento de ${table}?`)) {
-                 // Nota: La tabla 'cameras' fue eliminada de la navegación, pero por si acaso la dejamos aquí
                  const { error } = await supabase.from(table).delete().eq('id', postId).eq('user_id', USER_ID);
+                 
                  if (error && error.code === '42501' && !IS_ADMIN) { 
                      alert('No tienes permiso para borrar publicaciones de otros guardias.');
                  } else if (error) {
@@ -1379,7 +1529,10 @@
                  } else {
                      alert('Elemento borrado.');
                      if (table === 'posts') loadFeed(true);
-                     // if (table === 'cameras') loadCameras(true); // Lógica de cámaras eliminada
+                     if (table === 'cameras') {
+                         loadCameras();
+                         closeMonitorViewer();
+                     }
                  }
              }
         }
